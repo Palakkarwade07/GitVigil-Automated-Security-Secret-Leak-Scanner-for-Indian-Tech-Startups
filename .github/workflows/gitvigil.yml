@@ -2,7 +2,11 @@ name: GitVigil Security Scan
 
 on:
   pull_request:
-    branches: [ main ]
+    branches: [ main, master ]
+
+permissions:
+  pull-requests: write
+  contents: read
 
 jobs:
   security-scan:
@@ -28,3 +32,9 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPO_NAME: ${{ github.repository }}
         run: python scanner.py
+
+      - name: Post PR Comment
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          path: gitvigil_report.md
+          header: gitvigil-security-report

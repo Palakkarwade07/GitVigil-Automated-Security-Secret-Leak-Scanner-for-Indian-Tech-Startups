@@ -1,0 +1,4 @@
+Project Name: GitVigil— Automated Security & Secret Leak Scanner for Indian Tech Startups
+Category: Software Development & Developer Tools
+Description: AI-powered security sentinel that prevents secret leaks and scans code diffs using BharatCode API.
+Hackathon: BharatCode Build League

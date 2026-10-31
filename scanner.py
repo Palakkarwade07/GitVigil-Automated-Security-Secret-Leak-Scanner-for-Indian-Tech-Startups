@@ -7,26 +7,39 @@ BHARATCODE_API_URL = "https://bharatcode.ai/api/model/v1/chat/completions"
 API_KEY = os.getenv("BHARATCODE_API_KEY")
 
 def get_git_diff():
-    """Extracts the latest git diff from the local repository or CI environment."""
+    """Extracts the full PR diff using merge-base or falls back safely."""
     try:
         repo = Repo(os.getcwd())
-        # If running in GitHub Actions, get the pull request diff range if available
+        
         if os.getenv("GITHUB_ACTIONS"):
-            diff = repo.git.diff('HEAD^', 'HEAD')
+            base_ref = os.getenv("GITHUB_BASE_REF")
+            if base_ref:
+                try:
+                    # Fetch base ref to ensure git has it for comparison
+                    repo.git.fetch("origin", base_ref)
+                    merge_base = repo.git.merge_base(f"origin/{base_ref}", "HEAD").strip()
+                    print(f"🔍 Computed merge-base between origin/{base_ref} and HEAD: {merge_base}")
+                    return repo.git.diff(merge_base, 'HEAD')
+                except Exception as e:
+                    print(f"⚠️ Merge-base calculation failed ({e}), falling back to HEAD^..HEAD")
+            
+            # Fallback for GITHUB_ACTIONS if base_ref is missing
+            return repo.git.diff('HEAD^', 'HEAD')
         else:
+            # Local run fallback
             diff = repo.git.diff('--cached')
             if not diff:
                 diff = repo.git.diff('HEAD~1')
-        return diff
+            return diff
+            
     except Exception as e:
-        print(f"Warning/Error reading git diff via GitPython: {e}")
-        # Fallback: read environment diff or staged changes if any
+        print(f"❌ Error reading git diff via GitPython: {e}")
         return os.getenv("CUSTOM_DIFF", "")
 
 def analyze_code_diff(code_diff):
     """Sends code diff to BharatCode API for deep vulnerability & secret leak analysis."""
     if not API_KEY:
-        print("Error: BHARATCODE_API_KEY environment variable is missing.")
+        print("❌ Error: BHARATCODE_API_KEY environment variable is missing.")
         sys.exit(1)
 
     headers = {
@@ -59,14 +72,18 @@ def analyze_code_diff(code_diff):
     }
     
     try:
-        response = requests.post(BHARATCODE_API_URL, json=payload, headers=headers)
+        response = requests.post(BHARATCODE_API_URL, json=payload, headers=headers, timeout=30)
         if response.status_code == 200:
             result = response.json()
             return result.get("choices", [{}])[0].get("message", {}).get("content", "No analysis returned.")
         else:
-            return f"❌ BharatCode API Error: {response.status_code} - {response.text}"
+            error_msg = f"❌ BharatCode API Error: Status {response.status_code}\n{response.text}"
+            print(error_msg)
+            return error_msg
     except Exception as e:
-        return f"❌ Request Failed: {e}"
+        error_msg = f"❌ Request Failed: {e}"
+        print(error_msg)
+        return error_msg
 
 if __name__ == "__main__":
     print("🔒 GitVigil: Scanning code diff for security vulnerabilities using BharatCode API...")
@@ -80,7 +97,14 @@ if __name__ == "__main__":
         print(report)
         print("="*50)
         
-        # Save report to a file so GitHub Actions can post it as a comment
+        # Check if the report indicates an API failure
+        if report.startswith("❌"):
+            with open("gitvigil_report.md", "w", encoding="utf-8") as f:
+                f.write("### ❌ GitVigil Security Audit Failed\n\n")
+                f.write(report)
+            sys.exit(1)  # Fail CI run explicitly on error
+            
+        # Save successful report for GitHub Actions
         with open("gitvigil_report.md", "w", encoding="utf-8") as f:
             f.write("### 🛡️ GitVigil Automated Security Audit\n\n")
             f.write(report)
